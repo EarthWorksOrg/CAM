@@ -1895,6 +1895,7 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
 
    nan_array = nan
 
+   call t_startf('micro_pumas_cam_tend:CPU')
    ! Allocate the proc_rates DDT
    ! IMPORTANT NOTE -- elements in proc_rates are dimensioned to the nlev dimension while
    !     all the other arrays in this routine are dimensioned pver.  This is required because
@@ -2280,9 +2281,11 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
    frzimm(:ncol,:top_lev-1)=0._r8
    frzcnt(:ncol,:top_lev-1)=0._r8
    frzdep(:ncol,:top_lev-1)=0._r8
+   call t_stopf('micro_pumas_cam_tend:CPU')
 
    do it = 1, num_steps
 
+     call t_startf('micro_pumas_cam_tend:micro_pumas_tend')
      call micro_pumas_tend( &
               ncol,         nlev,           dtime/num_steps,&
               state_loc%t(:ncol,top_lev:),              state_loc%q(:ncol,top_lev:,ixq),            &
@@ -2333,6 +2336,8 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
               tnd_qsnow(:ncol,top_lev:),tnd_nsnow(:ncol,top_lev:),re_ice(:ncol,top_lev:),&
               prer_evap(:ncol,top_lev:),                                     &
               frzimm(:ncol,top_lev:),  frzcnt(:ncol,top_lev:),  frzdep(:ncol,top_lev:)   )
+      call t_stopf('micro_pumas_cam_tend:micro_pumas_tend')
+      call t_startf('micro_pumas_cam_tend:CPU')
 
       call handle_errmsg(errstring, subname="micro_pumas_cam_tend")
 
@@ -2382,9 +2387,11 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
          proc_rates%ank(:ncol,:,:) = proc_rates%ank(:ncol,:,:)/num_steps
          proc_rates%amk_out(:ncol,:,:) = proc_rates%amk_out(:ncol,:,:)/num_steps
       end if
+      call t_stopf('micro_pumas_cam_tend:CPU')
 
    end do
 
+   call t_startf('micro_pumas_cam_tend:CPU')
    ! Divide ptend by substeps.
    call physics_ptend_scale(ptend, 1._r8/num_steps, ncol)
 
@@ -2851,16 +2858,24 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
    rel_fn_grid = 10._r8
 
    ncic_grid = 1.e8_r8
+   call t_stopf('micro_pumas_cam_tend:CPU')
 
    do k = top_lev, pver
+      call t_startf('micro_pumas_cam_tend:H2D')
       !$acc data copyin  (mg_liq_props,icwmrst_grid(:ngrdcol,k),rho_grid(:ngrdcol,k)) &
       !$acc      copy    (ncic_grid(:ngrdcol,k)) &
       !$acc      copyout (mu_grid(:ngrdcol,k),lambdac_grid(:ngrdcol,k))
+      call t_stopf('micro_pumas_cam_tend:H2D')
+      call t_startf('micro_pumas_cam_tend:GPU')
       call size_dist_param_liq(mg_liq_props, icwmrst_grid(:ngrdcol,k), &
                                ncic_grid(:ngrdcol,k), rho_grid(:ngrdcol,k), &
                                mu_grid(:ngrdcol,k), lambdac_grid(:ngrdcol,k), ngrdcol)
+      call t_stopf('micro_pumas_cam_tend:GPU')
+      call t_startf('micro_pumas_cam_tend:D2H')
       !$acc end data
+      call t_stopf('micro_pumas_cam_tend:D2H')
    end do
+   call t_startf('micro_pumas_cam_tend:CPU')
 
    where (icwmrst_grid(:ngrdcol,top_lev:) > qsmall)
       rel_fn_grid(:ngrdcol,top_lev:) = &
@@ -2877,16 +2892,24 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
    ! Calculate ncic on the grid
    ncic_grid(:ngrdcol,top_lev:) = nc_grid(:ngrdcol,top_lev:) / &
         max(mincld,liqcldf_grid(:ngrdcol,top_lev:))
+   call t_stopf('micro_pumas_cam_tend:CPU')
 
    do k = top_lev, pver
+      call t_startf('micro_pumas_cam_tend:H2D')
       !$acc data copyin  (mg_liq_props,icwmrst_grid(:ngrdcol,k), rho_grid(:ngrdcol,k)) &
       !$acc      copy    (ncic_grid(:ngrdcol,k)) &
       !$acc      copyout (mu_grid(:ngrdcol,k),lambdac_grid(:ngrdcol,k))
+      call t_stopf('micro_pumas_cam_tend:H2D')
+      call t_startf('micro_pumas_cam_tend:GPU')
       call size_dist_param_liq(mg_liq_props, icwmrst_grid(:ngrdcol,k), &
            ncic_grid(:ngrdcol,k), rho_grid(:ngrdcol,k), &
            mu_grid(:ngrdcol,k), lambdac_grid(:ngrdcol,k), ngrdcol)
+      call t_stopf('micro_pumas_cam_tend:GPU')
+      call t_startf('micro_pumas_cam_tend:D2H')
       !$acc end data
+      call t_stopf('micro_pumas_cam_tend:D2H')
    end do
+   call t_startf('micro_pumas_cam_tend:CPU')
 
    where (icwmrst_grid(:ngrdcol,top_lev:) >= qsmall)
       rel_grid(:ngrdcol,top_lev:) = &
@@ -2953,15 +2976,23 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
 
    niic_grid(:ngrdcol,top_lev:) = ni_grid(:ngrdcol,top_lev:) / &
         max(mincld,icecldf_grid(:ngrdcol,top_lev:))
+   call t_stopf('micro_pumas_cam_tend:CPU')
 
    do k = top_lev, pver
+      call t_startf('micro_pumas_cam_tend:H2D')
       !$acc data copyin  (mg_ice_props, icimrst_grid(:ngrdcol,k)) &
       !$acc      copy    (niic_grid(:ngrdcol,k)) &
       !$acc      copyout (rei_grid(:ngrdcol,k))
+      call t_stopf('micro_pumas_cam_tend:H2D')
+      call t_startf('micro_pumas_cam_tend:GPU')
       call size_dist_param_basic(mg_ice_props,icimrst_grid(:ngrdcol,k), &
                                  niic_grid(:ngrdcol,k),rei_grid(:ngrdcol,k),ngrdcol)
+      call t_stopf('micro_pumas_cam_tend:GPU')
+      call t_startf('micro_pumas_cam_tend:D2H')
       !$acc end data
+      call t_stopf('micro_pumas_cam_tend:D2H')
    end do
+   call t_startf('micro_pumas_cam_tend:CPU')
 
    where (icimrst_grid(:ngrdcol,top_lev:) >= qsmall)
       rei_grid(:ngrdcol,top_lev:) = 1.5_r8/rei_grid(:ngrdcol,top_lev:) &
@@ -3511,6 +3542,7 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
    if (qsatfac_idx <= 0) then
       deallocate(qsatfac)
    end if
+   call t_stopf('micro_pumas_cam_tend:CPU')
 
 end subroutine micro_pumas_cam_tend
 
