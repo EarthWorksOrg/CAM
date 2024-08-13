@@ -53,6 +53,7 @@ use modal_aerosol_properties_mod, only: modal_aerosol_properties
 
 use aerosol_state_mod, only: aerosol_state
 use modal_aerosol_state_mod, only: modal_aerosol_state
+use perf_mod, only: t_startf, t_stopf
 
 implicit none
 private
