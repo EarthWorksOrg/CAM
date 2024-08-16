@@ -1990,7 +1990,7 @@ end subroutine clubb_init_cnst
     use macrop_driver,             only: liquid_macro_tend
     use clubb_mf,                  only: integrate_mf
 
-    use perf_mod
+    use perf_mod,                  only: t_startf, t_stopf
 
 #endif
 
