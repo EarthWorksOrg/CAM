@@ -28,7 +28,7 @@ module physpkg
   use phys_control,     only: phys_do_flux_avg, phys_getopts, waccmx_is
   use scamMod,          only: single_column, scm_crm_mode
   use flux_avg,         only: flux_avg_init
-  use perf_mod
+  use perf_mod,         only: t_startf, t_stopf, t_barrierf, t_adj_detailf
   use cam_logfile,     only: iulog
   use camsrfexch,      only: cam_export
 
@@ -1420,7 +1420,7 @@ contains
     use charge_neutrality,  only: charge_balance
     use qbo,                only: qbo_relax
     use iondrag,            only: iondrag_calc, do_waccm_ions
-    use perf_mod
+    use perf_mod,           only: t_startf, t_stopf
     use flux_avg,           only: flux_avg_run
     use unicon_cam,         only: unicon_cam_org_diags
     use cam_history,        only: outfld
@@ -2072,7 +2072,7 @@ contains
     use carma_flags_mod, only: carma_do_detrain, carma_do_cldice, carma_do_cldliq,  carma_do_wetdep
     use radiation,       only: radiation_tend
     use cloud_diagnostics, only: cloud_diagnostics_calc
-    use perf_mod
+    use perf_mod,        only: t_startf, t_stopf
     use mo_gas_phase_chemdr,only: map2chm
     use clybry_fam,         only: clybry_fam_adj
     use clubb_intr,      only: clubb_tend_cam
@@ -2938,7 +2938,7 @@ subroutine phys_timestep_init(phys_state, cam_in, cam_out, pbuf2d)
   use solar_data,          only: solar_data_advance
   use qbo,                 only: qbo_timestep_init
   use iondrag,             only: do_waccm_ions, iondrag_timestep_init
-  use perf_mod
+  use perf_mod,            only: t_startf, t_stopf
 
   use prescribed_ozone,    only: prescribed_ozone_adv
   use prescribed_ghg,      only: prescribed_ghg_adv

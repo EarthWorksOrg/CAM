@@ -58,7 +58,7 @@ use mo_fluxes_byband,      only: ty_fluxes_byband
 use string_utils,        only: to_lower
 use cam_abortutils,      only: endrun, handle_allocate_error
 use cam_logfile,         only: iulog
-use perf_mod
+use perf_mod,            only: t_startf, t_stopf
 
 
 implicit none
