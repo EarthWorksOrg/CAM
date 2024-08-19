@@ -1080,18 +1080,18 @@ contains
     ! 1) modal aerosols are affecting the climate, or
     ! 2) prognostic modal aerosols are enabled
 
-    call t_startf('aero_model_wetdep:CPU:calcsize')
+    call t_startf('aero_model_wetdep:NAR:calcsize')
     ! for prognostic modal aerosols the transfer of mass between aitken and accumulation
     ! modes is done in conjunction with the dry radius calculation
     call modal_aero_calcsize_sub(state, ptend, dt, pbuf)
-    call t_stopf('aero_model_wetdep:CPU:calcsize')
+    call t_stopf('aero_model_wetdep:NAR:calcsize')
 
-    call t_startf('aero_model_wetdep:CPU:wateruptake')
+    call t_startf('aero_model_wetdep:NAR:wateruptake')
     call modal_aero_wateruptake_dr(state, pbuf)
-    call t_stopf('aero_model_wetdep:CPU:wateruptake')
+    call t_stopf('aero_model_wetdep:NAR:wateruptake')
 
     if (nwetdep<1) return
-    call t_startf('aero_model_wetdep:CPU:wetdep')
+    call t_startf('aero_model_wetdep:NAR:wetdep')
 
     call wetdep_inputs_set( state, pbuf, dep_inputs )
 
@@ -1611,10 +1611,10 @@ contains
           enddo ! lspec = 0, nspec_amode(m)+1
        enddo ! lphase = 1, 2
     enddo ! m = 1, ntot_amode
-    call t_stopf('aero_model_wetdep:CPU:wetdep')
+    call t_stopf('aero_model_wetdep:NAR:wetdep')
 
     if (convproc_do_aer) then
-       call t_startf('aero_model_wetdep:CPU:ma_convproc')
+       call t_startf('aero_model_wetdep:NAR:ma_convproc')
        call ma_convproc_intr( state, ptend, pbuf, dt,                &
             nsrflx_mzaer2cnvpr, qsrflx_mzaer2cnvpr, aerdepwetis, &
             dcondt_resusp3d)
@@ -1646,7 +1646,7 @@ contains
           end do   ! m aerosol modes
        end if
 
-       call t_stopf('aero_model_wetdep:CPU:ma_convproc')
+       call t_stopf('aero_model_wetdep:NAR:ma_convproc')
     endif
 
     ! if the user has specified prescribed aerosol dep fluxes then
