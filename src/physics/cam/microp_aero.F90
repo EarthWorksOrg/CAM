@@ -53,7 +53,6 @@ use modal_aerosol_properties_mod, only: modal_aerosol_properties
 
 use aerosol_state_mod, only: aerosol_state
 use modal_aerosol_state_mod, only: modal_aerosol_state
-use perf_mod, only: t_startf, t_stopf
 
 implicit none
 private
@@ -403,6 +402,7 @@ subroutine microp_aero_readnl(nlfile)
    use namelist_utils,  only: find_group_name
    use units,           only: getunit, freeunit
    use spmd_utils,      only: mpicom, mstrid=>masterprocid, mpi_real8
+   use perf_mod,        only: t_startf, t_stopf
 
    character(len=*), intent(in) :: nlfile  ! filepath for file containing namelist input
 
@@ -480,6 +480,7 @@ end subroutine microp_aero_readnl
 subroutine microp_aero_run ( &
    state, ptend_all, deltatin, pbuf)
 
+   use perf_mod, only:t_startf,t_stopf
    ! input arguments
    type(physics_state),         intent(in)    :: state
    type(physics_ptend),         intent(out)   :: ptend_all
@@ -682,13 +683,13 @@ subroutine microp_aero_run ( &
 
    !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
    !ICE Nucleation
-   call t_startf('microp_aero_run:CPU:ice_nucleate')
+   call t_startf('microp_aero_run:NAR:ice_nucleate')
    if (associated(aero_props_obj).and.associated(aero_state1_obj)) then
       call nucleate_ice_cam_calc(state1, wsubi, pbuf, deltatin, ptend_loc, aero_props_obj, aero_state1_obj)
    else
       call nucleate_ice_cam_calc(state1, wsubi, pbuf, deltatin, ptend_loc)
    end if
-   call t_stopf('microp_aero_run:CPU:ice_nucleate')
+   call t_stopf('microp_aero_run:NAR:ice_nucleate')
 
    call physics_ptend_sum(ptend_loc, ptend_all, ncol)
    call physics_update(state1, ptend_loc, deltatin)
@@ -733,7 +734,7 @@ subroutine microp_aero_run ( &
 
       ! If not using preexsiting ice, then only use cloudbourne aerosol for the
       ! liquid clouds. This is the same behavior as CAM5.
-      call t_startf('microp_aero_run:CPU:dropmixnuc')
+      call t_startf('microp_aero_run:NAR:dropmixnuc')
       if (use_preexisting_ice) then
          call dropmixnuc( aero_props_obj, aero_state1_obj, &
               state1, ptend_loc, deltatin, pbuf, wsub, wsub_min_asf, &
@@ -744,7 +745,7 @@ subroutine microp_aero_run ( &
               state1, ptend_loc, deltatin, pbuf, wsub, wsub_min_asf, &
               lcldn, lcldo, cldliqf, nctend_mixnuc, factnum)
       end if
-      call t_stopf('microp_aero_run:CPU:dropmixnuc')
+      call t_stopf('microp_aero_run:NAR:dropmixnuc')
 
       npccn(:ncol,:) = nctend_mixnuc(:ncol,:)
 
@@ -757,7 +758,7 @@ subroutine microp_aero_run ( &
       ! no tendencies returned from ndrop_bam_run, so just init ptend here
       call physics_ptend_init(ptend_loc, state1%psetcols, 'none')
 
-      call t_startf('microp_aero_run:CPU:ndrop_bam_run')
+      call t_startf('microp_aero_run:NAR:ndrop_bam_run')
       do k = top_lev, pver
          do i = 1, ncol
 
@@ -777,7 +778,7 @@ subroutine microp_aero_run ( &
             npccn(i,k) = (dum*lcldm(i,k) - state1%q(i,k,numliq_idx))/deltatin
          end do
       end do
-      call t_stopf('microp_aero_run:CPU:ndrop_bam_run')
+      call t_stopf('microp_aero_run:NAR:ndrop_bam_run')
 
    end if
 
@@ -849,25 +850,25 @@ subroutine microp_aero_run ( &
 
    if (.not. clim_modal_aero) then
 
-      call t_startf('microp_aero_run:CPU:ndrop_bam_ccn')
+      call t_startf('microp_aero_run:NAR:ndrop_bam_ccn')
       ! ccn concentration as diagnostic
       call ndrop_bam_ccn(lchnk, ncol, maerosol, naer2)
 
       deallocate( &
          naer2,    &
          maerosol)
-      call t_stopf('microp_aero_run:CPU:ndrop_bam_ccn')
+      call t_stopf('microp_aero_run:NAR:ndrop_bam_ccn')
 
    end if
 
-   call t_startf('microp_aero_run:CPU:hetfrz_classnuc')
+   call t_startf('microp_aero_run:NAR:hetfrz_classnuc')
    ! heterogeneous freezing
    if (use_hetfrz_classnuc) then
 
       call hetfrz_classnuc_cam_calc(aero_props_obj, aero_state1_obj, state1, deltatin, factnum, pbuf)
 
    end if
-   call t_stopf('microp_aero_run:CPU:hetfrz_classnuc')
+   call t_stopf('microp_aero_run:NAR:hetfrz_classnuc')
 
    if (clim_modal_aero) then
       deallocate(factnum)
