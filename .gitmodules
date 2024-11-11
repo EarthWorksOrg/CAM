@@ -80,7 +80,7 @@
 	url = https://github.com/EarthWorksOrg/MPAS-Model.git
         fxrequired = AlwaysRequired
         fxsparse = ../.mpas_sparse_checkout
-        fxtag = mpas-ew2.3.001
+        fxtag = mpasa-ew2.3.002
 	fxDONOTUSEurl = https://github.com/MPAS-Dev/MPAS-Model.git
 
 [submodule "cosp2"]
