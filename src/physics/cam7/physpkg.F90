@@ -1717,7 +1717,6 @@ contains
           ! Calculate macrophysical tendency (sedimentation, detrain, cloud fraction)
           !===================================================
 
-          call t_startf('tphysac:clubb_tend_cam')
 
              ! =====================================================
              !    CLUBB call (PBL, shallow convection, macrophysics)
@@ -1728,10 +1727,11 @@ contains
                      fh2o, surfric, obklen, flx_heat, cmfmc, dlf, det_s, det_ice, net_flx)
              end if
 
+             call t_startf('tphysac:clubb_tend_cam')
              call clubb_tend_cam(state, ptend, pbuf, cld_macmic_ztodt,&
                 cmfmc, cam_in, macmic_it, cld_macmic_num_steps, &
                 dlf, det_s, det_ice)
-          call t_stopf('tphysac:clubb_tend_cam')
+             call t_stopf('tphysac:clubb_tend_cam')
 
              ! Since we "added" the reserved liquid back in this routine, we need
              ! to account for it in the energy checker
@@ -2039,7 +2039,6 @@ contains
                   fh2o, surfric, obklen, flx_heat, cmfmc, dlf, det_s, det_ice, net_flx)
     end if
 
-
     call t_startf('tphysac:radiation_tend')
     call radiation_tend( &
        state, ptend, pbuf, cam_out, cam_in, net_flx)
@@ -2073,6 +2072,7 @@ contains
     !===================================================
     ! Source/sink terms for advected tracers.
     !===================================================
+    call t_startf('adv_tracer_src_snk')
     ! Test tracers
 
     if (trim(cam_take_snapshot_before) == "aoa_tracers_timestep_tend") then
@@ -2147,6 +2147,7 @@ contains
        call check_tracers_chng(state, tracerint, "chem_timestep_tend", nstep, ztodt, &
             cam_in%cflx)
     end if
+    call t_stopf('adv_tracer_src_snk')
 
     !===================================================
     ! Vertical diffusion/pbl calculation
@@ -2195,7 +2196,6 @@ contains
     ! Rayleigh friction calculation
     !===================================================
     call t_startf('tphysac:rayleigh_friction')
-    call t_startf('rayleigh_friction')
     if (trim(cam_take_snapshot_before) == "rayleigh_friction_tend") then
        call cam_snapshot_all_outfld_tphysac(cam_snapshot_before_num, state, tend, cam_in, cam_out, pbuf, &
             fh2o, surfric, obklen, flx_heat, cmfmc, dlf, det_s, det_ice, net_flx)
@@ -2225,12 +2225,11 @@ contains
       call outfld( 'VTEND_RAYLEIGH', ptend%v, pcols, lchnk)
     end if
     call physics_update(state, ptend, ztodt, tend)
-    call t_stopf('tphysac:rayleigh_friction')
     if (trim(cam_take_snapshot_after) == "rayleigh_friction_tend") then
        call cam_snapshot_all_outfld_tphysac(cam_snapshot_after_num, state, tend, cam_in, cam_out, pbuf, &
             fh2o, surfric, obklen, flx_heat, cmfmc, dlf, det_s, det_ice, net_flx)
     end if
-    call t_stopf('rayleigh_friction')
+    call t_stopf('tphysac:rayleigh_friction')
 
     if (do_clubb_sgs) then
       call check_energy_cam_chng(state, tend, "vdiff", nstep, ztodt, zero, zero, zero, zero)
@@ -2968,6 +2967,7 @@ contains
          call t_startf('tphysbc:modal_aero_calcsize')
          call modal_aero_calcsize_diag(state, pbuf)
          call t_stopf('tphysbc:modal_aero_calcsize')
+
          call t_startf('tphysbc:modal_aero_wateruptake')
          call modal_aero_wateruptake_dr(state, pbuf)
          call t_stopf('tphysbc:modal_aero_wateruptake')

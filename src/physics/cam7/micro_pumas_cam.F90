@@ -2482,7 +2482,7 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
 
    do it = 1, num_steps
 
-     call t_startf('micro_pumas_cam_tend:NAR')
+     call t_startf('micro_pumas_cam_tend:micro_pumas_tend')
      call micro_pumas_ccpp_run( &
               ncol,    nlev,  nlev+1, num_dust_bins,    dtime/num_steps,                        &
               state_loc%t(:ncol,top_lev:),              state_loc%q(:ncol,top_lev:,ixq),        &
@@ -2540,7 +2540,9 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
               nfice(:ncol,top_lev:),                    qcrat(:ncol,top_lev:),                  &
               prer_evap(:ncol,top_lev:),                proc_rates,                             &
               ccpp_errmsg,                              ierr                                   )
+     call t_stopf('micro_pumas_cam_tend:micro_pumas_tend')
 
+     call t_startf('micro_pumas_cam_tend:NAR')
       call handle_errmsg(ccpp_errmsg, subname="micro_pumas_cam_tend")
 
       call physics_ptend_init(ptend_loc, psetcols, "micro_pumas", &
@@ -2589,7 +2591,7 @@ subroutine micro_pumas_cam_tend(state, ptend, dtime, pbuf)
          proc_rates%ank(:ncol,:,:) = proc_rates%ank(:ncol,:,:)/num_steps
          proc_rates%amk_out(:ncol,:,:) = proc_rates%amk_out(:ncol,:,:)/num_steps
       end if
-     call t_stopf('micro_pumas_cam_tend:NAR')
+      call t_stopf('micro_pumas_cam_tend:NAR')
 
    end do
 
