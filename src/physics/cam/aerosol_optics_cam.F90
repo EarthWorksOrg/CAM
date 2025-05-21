@@ -1,5 +1,3 @@
-#define _881FIX_
-#define _945FIX_
 module aerosol_optics_cam
   use shr_kind_mod, only: r8 => shr_kind_r8
   use shr_kind_mod, only: cl => shr_kind_cl
@@ -18,15 +16,20 @@ module aerosol_optics_cam
   use cam_history_support, only: fillvalue
 
   use tropopause, only : tropopause_findChemTrop
+  use wv_saturation, only: qsat
 
   use aerosol_properties_mod, only: aerosol_properties
   use modal_aerosol_properties_mod, only: modal_aerosol_properties
+  use carma_aerosol_properties_mod, only: carma_aerosol_properties
 
   use aerosol_state_mod,      only: aerosol_state
   use modal_aerosol_state_mod,only: modal_aerosol_state
+  use carma_aerosol_state_mod,only: carma_aerosol_state
 
   use aerosol_optics_mod,     only: aerosol_optics
   use refractive_aerosol_optics_mod, only: refractive_aerosol_optics
+  use hygrocoreshell_aerosol_optics_mod, only: hygrocoreshell_aerosol_optics
+  use hygrowghtpct_aerosol_optics_mod, only: hygrowghtpct_aerosol_optics
 
   implicit none
 
@@ -38,21 +41,12 @@ module aerosol_optics_cam
   public :: aerosol_optics_cam_sw
   public :: aerosol_optics_cam_lw
 
-#ifdef _945FIX_
-  type aero_props_t
-      type(modal_aerosol_properties), pointer :: obj => null()
-  end type aero_props_t
-  type aero_state_t
-      type(modal_aerosol_state), pointer :: obj => null()
-  end type aero_state_t
-#else
   type aero_props_t
      class(aerosol_properties), pointer :: obj => null()
   end type aero_props_t
   type aero_state_t
      class(aerosol_state), pointer :: obj => null()
   end type aero_state_t
-#endif
 
   type(aero_props_t), allocatable :: aero_props(:) ! array of aerosol properties objects to allow for
                                                    ! multiple aerosol representations in the same sim
@@ -63,6 +57,7 @@ module aerosol_optics_cam
   complex(r8) :: crefwlw(nlwbands) = -huge(1._r8) ! complex refractive index for water infrared
   character(len=cl) :: water_refindex_file = 'NONE' ! full pathname for water refractive index dataset
 
+  logical :: carma_active = .false.
   logical :: modal_active = .false.
   integer :: num_aero_models = 0
   integer :: lw10um_indx = -1            ! wavelength index corresponding to 10 microns
@@ -136,7 +131,7 @@ contains
     use ioFileMod,        only: getfil
 
     character(len=*), parameter :: prefix = 'aerosol_optics_cam_init: '
-    integer :: nmodes=0, iaermod, istat, ilist, i
+    integer :: nmodes=0, nbins=0, iaermod, istat, ilist, i
 
     logical :: call_list(0:n_diag)
     real(r8) :: lwavlen_lo(nlwbands), lwavlen_hi(nlwbands)
@@ -156,11 +151,16 @@ contains
 
     num_aero_models = 0
 
-    call rad_cnst_get_info(0, nmodes=nmodes)
+    call rad_cnst_get_info(0, nmodes=nmodes, nbins=nbins)
     modal_active = nmodes>0
+    carma_active = nbins>0
 
+    ! count aerosol models
     if (modal_active) then
-       num_aero_models = num_aero_models+1 ! count aerosol models
+       num_aero_models = num_aero_models+1
+    end if
+    if (carma_active) then
+       num_aero_models = num_aero_models+1
     end if
 
     if (num_aero_models>0) then
@@ -175,6 +175,10 @@ contains
     if (modal_active) then
        iaermod = iaermod+1
        aero_props(iaermod)%obj => modal_aerosol_properties()
+    end if
+    if (carma_active) then
+       iaermod = iaermod+1
+       aero_props(iaermod)%obj => carma_aerosol_properties()
     end if
 
     if (water_refindex_file=='NONE') then
@@ -511,6 +515,8 @@ contains
       call add_default ('EXTxASYMdn'     , 1, ' ')
    end if
 
+   call addfld( 'SULFWTPCT', (/ 'lev' /), 'I', '1', 'Sulfate Weight Percent' )
+
   end subroutine aerosol_optics_cam_init
 
   !===============================================================================
@@ -569,6 +575,11 @@ contains
     real(r8), allocatable :: pabs(:)  ! parameterized specific absorption (m2/kg)
     real(r8), allocatable :: palb(:)  ! parameterized single scattering albedo
     real(r8), allocatable :: pasm(:)  ! parameterized asymmetry factor
+
+    real(r8) :: relh(pcols,pver)
+    real(r8) :: sate(pcols,pver)     ! saturation vapor pressure
+    real(r8) :: satq(pcols,pver)     ! saturation specific humidity
+    real(r8) :: sulfwtpct(pcols,pver) ! sulf weight percent
 
     character(len=ot_length) :: opticstype
     integer :: iaermod
@@ -648,12 +659,17 @@ contains
     real(r8) :: ssavis(pcols)
     integer :: troplev(pcols)
 
-    nullify(aero_optics)
+    integer :: i, k
 
-    call tropopause_findChemTrop(state, troplev)
+    nullify(aero_optics)
 
     lchnk = state%lchnk
     ncol  = state%ncol
+
+    !REMOVECAM - no longer need this when CAM is retired and pcols no longer exists
+    troplev(:) = 0
+    !REMOVECAM_END
+    call tropopause_findChemTrop(state, troplev)
 
     mass(:ncol,:)        = state%pdeldry(:ncol,:)*rga
     air_density(:ncol,:) = state%pmid(:ncol,:)/(rair*state%t(:ncol,:))
@@ -702,6 +718,10 @@ contains
        iaermod = iaermod+1
        aero_state(iaermod)%obj => modal_aerosol_state( state, pbuf )
     end if
+    if (carma_active) then
+       iaermod = iaermod+1
+       aero_state(iaermod)%obj => carma_aerosol_state( state, pbuf )
+    end if
 
     allocate(pext(ncol), stat=istat)
     if (istat/=0) then
@@ -727,6 +747,9 @@ contains
 
        nbins=aeroprops%nbins(list_idx)
 
+       sulfwtpct(:ncol,:pver) = aerostate%wgtpct(ncol,pver)
+       call outfld('SULFWTPCT', sulfwtpct(1:ncol,:), ncol, lchnk)
+
        binloop: do ibin = 1, nbins
 
           dustaodbin(:) = 0._r8
@@ -739,6 +762,16 @@ contains
           case('modal') ! refractive method
              aero_optics=>refractive_aerosol_optics(aeroprops, aerostate, list_idx, ibin, &
                                                     ncol, pver, nswbands, nlwbands, crefwsw, crefwlw)
+          case('hygroscopic_coreshell')
+             ! calculate relative humidity for table lookup into rh grid
+             call qsat(state%t(:ncol,:), state%pmid(:ncol,:), sate(:ncol,:), satq(:ncol,:), ncol, pver)
+             relh(:ncol,:) = state%q(1:ncol,:,1) / satq(:ncol,:)
+             relh(:ncol,:) = max(1.e-20_r8,relh(:ncol,:))
+             aero_optics=>hygrocoreshell_aerosol_optics(aeroprops, aerostate, list_idx, &
+                                                        ibin, ncol, pver, relh(:ncol,:))
+          case('hygroscopic_wtp')
+             aero_optics=>hygrowghtpct_aerosol_optics(aeroprops, aerostate, list_idx, &
+                                                      ibin, ncol, pver, sulfwtpct(:ncol,:))
           case default
              call endrun(prefix//'optics method not recognized')
           end select
@@ -863,63 +896,33 @@ contains
             case('dust')
                dustvol(icol) = vol(icol)
                burdendust(icol) = burdendust(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatdust(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               absdust(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatdust(icol) = vol(icol) * specrefindex(iwav)%re
                absdust(icol)  =-vol(icol) * specrefindex(iwav)%im
-#endif
                hygrodust(icol)= vol(icol)*hygro_aer
             case('black-c')
                burdenbc(icol) = burdenbc(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatbc(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               absbc(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatbc(icol) = vol(icol) * specrefindex(iwav)%re
                absbc(icol)  =-vol(icol) * specrefindex(iwav)%im
-#endif
                hygrobc(icol)= vol(icol)*hygro_aer
             case('sulfate')
                burdenso4(icol) = burdenso4(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatsulf(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               abssulf(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatsulf(icol) = vol(icol) * specrefindex(iwav)%re
                abssulf(icol)  =-vol(icol) * specrefindex(iwav)%im
-#endif
                hygrosulf(icol)= vol(icol)*hygro_aer
             case('p-organic')
                burdenpom(icol) = burdenpom(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatpom(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               abspom(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatpom(icol) = vol(icol) * specrefindex(iwav)%re
                abspom(icol)  =-vol(icol) * specrefindex(iwav)%im
-#endif
                hygropom(icol)= vol(icol)*hygro_aer
             case('s-organic')
                burdensoa(icol) = burdensoa(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatsoa(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               abssoa(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatsoa(icol) = vol(icol) * specrefindex(iwav)%re
                abssoa(icol) = -vol(icol) * specrefindex(iwav)%im
-#endif
                hygrosoa(icol)= vol(icol)*hygro_aer
             case('seasalt')
                burdenseasalt(icol) = burdenseasalt(icol) + specmmr(icol,ilev)*mass(icol,ilev)
-#ifdef _881FIX_
-               scatsslt(icol) = vol(icol) * DBLE(specrefindex(iwav))
-               abssslt(icol)  =-vol(icol) * DIMAG(specrefindex(iwav))
-#else
                scatsslt(icol) = vol(icol) * specrefindex(iwav)%re
                abssslt(icol) = -vol(icol) * specrefindex(iwav)%im
-#endif
                hygrosslt(icol)= vol(icol)*hygro_aer
             end select
          end do
@@ -931,13 +934,8 @@ contains
             ! partition optical depth into contributions from each constituent
             ! assume contribution is proportional to refractive index X volume
 
-#ifdef _881FIX_
-            scath2o = watervol(icol,ilev)*DBLE(crefwsw(iwav))
-            absh2o = -watervol(icol,ilev)*DIMAG(crefwsw(iwav))
-#else
             scath2o = watervol(icol,ilev)*crefwsw(iwav)%re
             absh2o = -watervol(icol,ilev)*crefwsw(iwav)%im
-#endif
             sumscat = scatsulf(icol) + scatpom(icol) + scatsoa(icol) + scatbc(icol) + &
                  scatdust(icol) + scatsslt(icol) + scath2o
             sumabs  = abssulf(icol) + abspom(icol) + abssoa(icol) + absbc(icol) + &
@@ -1184,6 +1182,11 @@ contains
 
     real(r8), allocatable :: pabs(:)
 
+    real(r8) :: relh(pcols,pver)
+    real(r8) :: sate(pcols,pver)     ! saturation vapor pressure
+    real(r8) :: satq(pcols,pver)     ! saturation specific humidity
+    real(r8) :: sulfwtpct(pcols,pver) ! sulf weight percent
+
     character(len=32) :: opticstype
     integer :: iaermod
 
@@ -1203,6 +1206,10 @@ contains
        iaermod = iaermod+1
        aero_state(iaermod)%obj => modal_aerosol_state( state, pbuf )
     end if
+    if (carma_active) then
+       iaermod = iaermod+1
+       aero_state(iaermod)%obj => carma_aerosol_state( state, pbuf )
+    end if
 
     ncol = state%ncol
 
@@ -1220,6 +1227,8 @@ contains
 
        nbins=aero_props(iaermod)%obj%nbins(list_idx)
 
+       sulfwtpct(:ncol,:pver) = aerostate%wgtpct(ncol,pver)
+
        binloop: do ibin = 1, nbins
 
           call aeroprops%optics_params(list_idx, ibin, opticstype=opticstype)
@@ -1228,6 +1237,16 @@ contains
           case('modal') ! refractive method
              aero_optics=>refractive_aerosol_optics(aeroprops, aerostate, list_idx, ibin, &
                                                     ncol, pver, nswbands, nlwbands, crefwsw, crefwlw)
+          case('hygroscopic_coreshell')
+             ! calculate relative humidity for table lookup into rh grid
+             call qsat(state%t(:ncol,:), state%pmid(:ncol,:), sate(:ncol,:), satq(:ncol,:), ncol, pver)
+             relh(:ncol,:) = state%q(1:ncol,:,1) / satq(:ncol,:)
+             relh(:ncol,:) = max(1.e-20_r8,relh(:ncol,:))
+             aero_optics=>hygrocoreshell_aerosol_optics(aeroprops, aerostate, list_idx, &
+                                                        ibin, ncol, pver, relh(:ncol,:))
+          case('hygroscopic_wtp')
+             aero_optics=>hygrowghtpct_aerosol_optics(aeroprops, aerostate, list_idx, &
+                                                      ibin, ncol, pver, sulfwtpct(:ncol,:))
           case default
              call endrun(prefix//'optics method not recognized')
           end select

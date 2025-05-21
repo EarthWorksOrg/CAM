@@ -16,7 +16,6 @@ use physics_buffer,      only: physics_buffer_desc, pbuf_add_field, dtype_r8, pb
                                pbuf_set_field, pbuf_get_field, pbuf_old_tim_idx
 use camsrfexch,          only: cam_out_t, cam_in_t
 use physconst,           only: cappa, cpair, gravit
-use solar_irrad_data,    only: sol_tsi
 
 use time_manager,        only: get_nstep, is_first_step, is_first_restart_step, &
                                get_curr_calday, get_step_size
@@ -27,6 +26,7 @@ use rrtmgp_inputs,       only: rrtmgp_inputs_init
 
 use radconstants,        only: nradgas, gasnamelength, gaslist, nswbands, nlwbands, &
                                nswgpts, set_wavenumber_bands
+use rad_solar_var,       only: rad_solar_var_init, get_variability
 
 use cloud_rad_props,     only: cloud_rad_props_init
 
@@ -469,8 +469,11 @@ subroutine radiation_init(pbuf2d)
       ktoprad = 2
       nlaycam = pver
       nlay = nlay+1 ! reassign the value so later code understands to treat this case like nlay==pverp
-      write(iulog,*) 'RADIATION_INIT: Special case of 1 model interface at p < 1Pa. Top layer will be INCLUDED in radiation calculation.'
-      write(iulog,*) 'RADIATION_INIT: nlay = ',nlay, ' same as pverp: ',nlay==pverp
+      if (masterproc) then
+         write(iulog,*) 'RADIATION_INIT: Special case of 1 model interface at p < 1Pa. Top layer will be INCLUDED in radiation calculation.'
+         write(iulog,*) 'RADIATION_INIT: Top layer will be INCLUDED in radiation calculation.'
+         write(iulog,*) 'RADIATION_INIT: nlay = ',nlay, ' same as pverp: ',nlay==pverp
+      end if
    else
       ! nlay < pverp.  nlay layers are used in radiation calcs, and they are
       ! all CAM layers.
@@ -496,6 +499,7 @@ subroutine radiation_init(pbuf2d)
    ! Set the sw/lw band boundaries in radconstants.  Also sets
    ! indicies of specific bands for diagnostic output and COSP input.
    call set_wavenumber_bands(kdist_sw, kdist_lw)
+   call rad_solar_var_init()
 
    ! The spectral band boundaries need to be set before this init is called.
    call rrtmgp_inputs_init(ktopcam, ktoprad)
@@ -850,7 +854,7 @@ subroutine radiation_tend( &
    use radiation_data,     only: rad_data_write
 
    use interpolate_data,   only: vertinterp
-   use tropopause,         only: tropopause_find, TROP_ALG_HYBSTOB, TROP_ALG_CLIMATE
+   use tropopause,         only: tropopause_find_cam, TROP_ALG_HYBSTOB, TROP_ALG_CLIMATE
    use cospsimulator_intr, only: docosp, cospsimulator_intr_run, cosp_nradsteps
 
 
@@ -938,8 +942,8 @@ subroutine radiation_tend( &
 
    ! TOA solar flux on RRTMGP g-points
    real(r8), allocatable :: toa_flux(:,:)
-   ! TSI from RRTMGP data (from sum over g-point representation)
-   real(r8) :: tsi_ref
+   ! Scale factors based on spectral distribution from input irradiance dataset
+   real(r8), allocatable :: sfac(:,:)
    
    ! Planck sources for LW.
    type(ty_source_func_lw) :: sources_lw
@@ -1082,7 +1086,11 @@ subroutine radiation_tend( &
 
    ! Find tropopause height if needed for diagnostic output
    if (hist_fld_active('FSNR') .or. hist_fld_active('FLNR')) then
-      call tropopause_find(state, troplev, tropP=p_trop, primary=TROP_ALG_HYBSTOB, &
+      !REMOVECAM - no longer need this when CAM is retired and pcols no longer exists
+      troplev(:) = 0
+      p_trop(:) = 0._r8
+      !REMOVECAM_END
+      call tropopause_find_cam(state, troplev, tropP=p_trop, primary=TROP_ALG_HYBSTOB, &
                            backup=TROP_ALG_CLIMATE)
    end if
 
@@ -1094,6 +1102,7 @@ subroutine radiation_tend( &
 
       allocate( &
          t_sfc(ncol), emis_sfc(nlwbands,ncol), toa_flux(nday,nswgpts),     &
+         sfac(nday,nswgpts),                                               &
          t_rad(ncol,nlay), pmid_rad(ncol,nlay), pint_rad(ncol,nlay+1),     &
          t_day(nday,nlay), pmid_day(nday,nlay), pint_day(nday,nlay+1),     &
          coszrs_day(nday), alb_dir(nswbands,nday), alb_dif(nswbands,nday), &
@@ -1171,10 +1180,9 @@ subroutine radiation_tend( &
                   ! Compute the gas optics (stored in atm_optics_sw).
                   ! toa_flux is the reference solar source from RRTMGP data.
                   !$acc data copyin(kdist_sw,pmid_day,pint_day,t_day,gas_concs_sw) &
-                  !$acc      copy(atm_optics_sw) &
-                  !$acc      copyout(toa_flux)
+                  !$acc        copy(atm_optics_sw) &
+                  !$acc     copyout(toa_flux)
                   call t_stopf('radiation_tend:DTO')
-
                   call t_startf('radiation_tend:ACCR')
                   errmsg = kdist_sw%gas_optics( &
                      pmid_day, pint_day, t_day, gas_concs_sw, atm_optics_sw, &
@@ -1186,8 +1194,8 @@ subroutine radiation_tend( &
                   call stop_on_err(errmsg, sub, 'kdist_sw%gas_optics')
 
                   ! Scale the solar source
-                  tsi_ref = sum(toa_flux(1,:))
-                  toa_flux = toa_flux * sol_tsi * eccf / tsi_ref
+                  call get_variability(toa_flux, sfac)
+                  toa_flux = toa_flux * sfac * eccf
 
                end if
 
@@ -1201,21 +1209,17 @@ subroutine radiation_tend( &
                   
                if (nday > 0) then
 
-                  call t_startf('radiation_tend:DTO')
-                  !! ADDED by SS as part of RRTMGP data optimization
-                  !$acc data copyin(atm_optics_sw, toa_flux, &
-                  !$acc aer_sw, cloud_sw,  &
-                  !$acc aer_sw%tau, aer_sw%ssa, aer_sw%g, &
-                  !$acc atm_optics_sw%tau,  &
-                  !$acc atm_optics_sw%ssa, atm_optics_sw%g,   &
-                  !$acc cloud_sw%tau, cloud_sw%ssa, cloud_sw%g,  &
-                  !$acc alb_dir, alb_dif,coszrs_day) &
-                  !$acc copy(fswc, fswc%flux_net,fswc%flux_up,fswc%flux_dn, &
-                  !$acc      fsw,   fsw%flux_net, fsw%flux_up, fsw%flux_dn)
-                  call t_stopf('radiation_tend:DTO')
-
                   call t_startf('radiation_tend:ACCR')
                   ! Increment the gas optics (in atm_optics_sw) by the aerosol optics in aer_sw.
+                  !$acc data copyin(coszrs_day, toa_flux, alb_dir, alb_dif, &
+                  !$acc             atm_optics_sw, atm_optics_sw%tau, &
+                  !$acc             atm_optics_sw%ssa, atm_optics_sw%g, &
+                  !$acc             aer_sw, aer_sw%tau, &
+                  !$acc             aer_sw%ssa, aer_sw%g, &
+                  !$acc             cloud_sw, cloud_sw%tau, &
+                  !$acc             cloud_sw%ssa, cloud_sw%g) &
+                  !$acc        copy(fswc, fswc%flux_net,fswc%flux_up,fswc%flux_dn, &
+                  !$acc             fsw, fsw%flux_net, fsw%flux_up, fsw%flux_dn)
                   errmsg = aer_sw%increment(atm_optics_sw)
                   call stop_on_err(errmsg, sub, 'aer_sw%increment')
 
@@ -1239,7 +1243,6 @@ subroutine radiation_tend( &
                   call t_startf('radiation_tend:DTO')
                   !$acc end data
                   call t_stopf('radiation_tend:DTO')
-
                end if
 
                ! Transform RRTMGP outputs to CAM outputs and compute heating rates.
@@ -1300,25 +1303,24 @@ subroutine radiation_tend( &
 
                call t_startf('radiation_tend:DTO')
                ! Compute the gas optics and Planck sources.
-               !$acc data copyin(kdist_lw,pmid_rad,pint_rad,t_rad,t_sfc, &
-               !$acc gas_concs_lw) &
-               !$acc copy(atm_optics_lw, &
-               !$acc atm_optics_lw%tau, sources_lw, &
-               !$acc sources_lw%lay_source, sources_lw%sfc_source,  &
-               !$acc sources_lw%lev_source_inc, sources_lw%lev_source_dec, &
-               !$acc sources_lw%sfc_source_jac)
+               !$acc data copyin(kdist_lw, pmid_rad, pint_rad, &
+               !$acc             t_rad, t_sfc, gas_concs_lw) &
+               !$acc        copy(atm_optics_lw, atm_optics_lw%tau, &
+               !$acc             sources_lw, sources_lw%lay_source, &
+               !$acc             sources_lw%sfc_source, sources_lw%lev_source_inc, &
+               !$acc             sources_lw%lev_source_dec, sources_lw%sfc_source_jac)
                call t_stopf('radiation_tend:DTO')
 
                call t_startf('radiation_tend:ACCR')
                errmsg = kdist_lw%gas_optics( &
                   pmid_rad, pint_rad, t_rad, t_sfc, gas_concs_lw, &
                   atm_optics_lw, sources_lw)
-               call stop_on_err(errmsg, sub, 'kdist_lw%gas_optics')
                call t_stopf('radiation_tend:ACCR')
 
                call t_startf('radiation_tend:DTO')
                !$acc end data
                call t_stopf('radiation_tend:DTO')
+               call stop_on_err(errmsg, sub, 'kdist_lw%gas_optics')
 
                ! Set LW aerosol optical properties in the aer_lw object.
                call t_startf('radiation_tend:NAR:aer_lw')
@@ -1326,23 +1328,18 @@ subroutine radiation_tend( &
                call t_stopf('radiation_tend:NAR:aer_lw')
                
                call t_startf('radiation_tend:DTO')
-               !! Added by SS as part of RRTMGP data optimization
-               !$acc data copyin(atm_optics_lw, aer_lw, cloud_lw,  &
-               !$acc aer_lw%tau, &
-               !$acc atm_optics_lw%tau, &
-               !$acc cloud_lw%tau, &
-               !$acc sources_lw, &
-               !$acc sources_lw%lay_source, sources_lw%sfc_source,  &
-               !$acc sources_lw%lev_source_inc, sources_lw%lev_source_dec,  &
-               !$acc sources_lw%sfc_source_Jac, &
-               !$acc emis_sfc)  &
-               !$acc copy(flwc, flwc%flux_net,flwc%flux_up,flwc%flux_dn, &
-               !$acc      flw,   flw%flux_net, flw%flux_up, flw%flux_dn)
-               call t_stopf('radiation_tend:DTO')
-              call t_startf('radiation_tend:ACCR')
-
-
                ! Increment the gas optics by the aerosol optics.
+               !$acc data copyin(atm_optics_lw, atm_optics_lw%tau, &
+               !$acc             aer_lw, aer_lw%tau, &
+               !$acc             cloud_lw, cloud_lw%tau, &
+               !$acc             sources_lw, sources_lw%lay_source, &
+               !$acc             sources_lw%sfc_source, sources_lw%lev_source_inc, &
+               !$acc             sources_lw%lev_source_dec, sources_lw%sfc_source_Jac, &
+               !$acc             emis_sfc)  &
+               !$acc        copy(flwc, flwc%flux_net, flwc%flux_up, flwc%flux_dn, &
+               !$acc             flw, flw%flux_net, flw%flux_up, flw%flux_dn)
+               call t_stopf('radiation_tend:DTO')
+               call t_startf('radiation_tend:ACCR')
                errmsg = aer_lw%increment(atm_optics_lw)
                call stop_on_err(errmsg, sub, 'aer_lw%increment')
 
@@ -1380,7 +1377,7 @@ subroutine radiation_tend( &
       end if  ! if (dolw)
 
       deallocate( &
-         t_sfc, emis_sfc, toa_flux, t_rad, pmid_rad, pint_rad,  &
+         t_sfc, emis_sfc, toa_flux, sfac, t_rad, pmid_rad, pint_rad,  &
          t_day, pmid_day, pint_day, coszrs_day, alb_dir, alb_dif)
 
       !================!
@@ -1465,6 +1462,8 @@ subroutine radiation_tend( &
    qrs(:ncol,:) = qrs(:ncol,:) * state%pdel(:ncol,:)
    qrl(:ncol,:) = qrl(:ncol,:) * state%pdel(:ncol,:)
 
+   cam_out%netsw(:ncol) = fsns(:ncol)
+
    if (.not. present(rd_out)) then
       deallocate(rd)
    end if
@@ -1540,8 +1539,6 @@ subroutine radiation_tend( &
       fsnt(:ncol)     = fns(:ncol,ktopcam)  ! net sw flux at top-of-model (w/o extra layer)
       rd%fsnsc(:ncol) = fcns(:ncol,pverp)   ! net sw clearsky flux at surface
       rd%fsntc(:ncol) = fcns(:ncol,ktopcam) ! net sw clearsky flux at top
-
-      cam_out%netsw(:ncol) = fsns(:ncol)
 
       ! Output fluxes at 200 mb
       call vertinterp(ncol, pcols, pverp, state%pint, 20000._r8, fns,  rd%fsn200)
