@@ -36,8 +36,7 @@
 [submodule "atmos_phys"]
 	path = src/atmos_phys
 	url = https://github.com/EarthWorksOrg/atmospheric_physics
-        # fxtag = atmos_phys-ew2.5.000
-        fxtag = fix/nvhpc_mem_leak_01
+        fxtag = atmos_phys-ew2.5.001
         fxrequired = AlwaysRequired
 	fxDONOTUSEurl = https://github.com/ESCOMP/atmospheric_physics
 
