@@ -1474,6 +1474,7 @@ subroutine radiation_tend( &
    call free_fluxes(fswc)
 
    call sources_lw%finalize()
+   call free_optics_lw(atm_optics_lw)
    call free_optics_lw(cloud_lw)
    call free_optics_lw(aer_lw)
    call free_fluxes(flw)
