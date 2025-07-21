@@ -57,7 +57,7 @@ use string_utils,        only: to_lower
 use cam_abortutils,      only: endrun, handle_allocate_error
 use cam_logfile,         only: iulog
 use rrtmgp_pre,          only: radiation_do_ccpp
-use perf_mod,            only: t_startf, t_stopf
+
 
 implicit none
 private
@@ -1157,7 +1157,6 @@ subroutine radiation_tend( &
 
       if (dosw) then
 
-         call t_startf('radiation_tend:NAR:cloud_sw')
          ! Set cloud optical properties in cloud_sw object.
          call rrtmgp_set_cloud_sw( &
             state, pbuf, nlay, nday, idxday, nswgpts,            &
@@ -1166,7 +1165,6 @@ subroutine radiation_tend( &
             rd%tot_cld_vistau, rd%tot_icld_vistau, rd%liq_icld_vistau,    &
             rd%ice_icld_vistau, rd%snow_icld_vistau, rd%grau_icld_vistau, &
             cld_tau_cloudsim, snow_tau_cloudsim, grau_tau_cloudsim )
-         call t_stopf('radiation_tend:NAR:cloud_sw')
 
          if (write_output) then
             call radiation_output_cld(lchnk, rd)
@@ -1179,13 +1177,10 @@ subroutine radiation_tend( &
                if (nday > 0) then
 
                   ! Set gas volume mixing ratios for this call in gas_concs_sw.
-                  call t_startf('radiation_tend:NAR:gases_sw')
                   call rrtmgp_set_gases_sw( &
                      icall, state, pbuf, nlay, nday, &
                      idxday, gas_concs_sw)
-                  call t_stopf('radiation_tend:NAR:gases_sw')
 
-                  call t_startf('radiation_tend:DTO')
                   ! Compute the gas optics (stored in atm_optics_sw).
                   ! toa_flux is the reference solar source from RRTMGP data.
                   !$acc data copyin(kdist_sw%gas_props,pmid_day,pint_day,t_day,gas_concs_sw%gas_concs) &
@@ -1206,14 +1201,11 @@ subroutine radiation_tend( &
                ! Set SW aerosol optical properties in the aer_sw object.
                ! This call made even when no daylight columns because it does some
                ! diagnostic aerosol output.
-               call t_startf('radiation_tend:NAR:aer_sw')
                call rrtmgp_set_aer_sw( &
                   icall, state, pbuf, nday, idxday, nnite, idxnite, aer_sw)
-               call t_stopf('radiation_tend:NAR:aer_sw')
                   
                if (nday > 0) then
 
-                  call t_startf('radiation_tend:ACCR')
                   ! Increment the gas optics (in atm_optics_sw) by the aerosol optics in aer_sw.
                   !$acc data copyin(coszrs_day, toa_flux, alb_dir, alb_dif, &
                   !$acc             atm_optics_sw%optical_props, atm_optics_sw%optical_props%tau, atm_optics_sw%optical_props%ssa, &
@@ -1241,11 +1233,7 @@ subroutine radiation_tend( &
                      atm_optics_sw%optical_props, top_at_1, coszrs_day, toa_flux, &
                      alb_dir, alb_dif, fsw%fluxes)
                   call stop_on_err(errmsg, sub, 'all-sky rte_sw')
-                  call t_stopf('radiation_tend:ACCR')
-
-                  call t_startf('radiation_tend:DTO')
                   !$acc end data
-                  call t_stopf('radiation_tend:DTO')
                end if
 
                ! Transform RRTMGP outputs to CAM outputs and compute heating rates.
@@ -1331,7 +1319,6 @@ subroutine radiation_tend( &
                   call endrun(sub//': '//errmsg)
                end if
 
-               call t_startf('radiation_tend:DTO')
                ! Compute the gas optics and Planck sources.
                !$acc data copyin(kdist_lw%gas_props, pmid_rad, pint_rad, t_rad,  &
                !$acc             t_sfc, gas_concs_lw%gas_concs)                  &
@@ -1350,7 +1337,6 @@ subroutine radiation_tend( &
                !$acc end data
 
                ! Set LW aerosol optical properties in the aer_lw object.
-               call t_startf('radiation_tend:NAR:aer_lw')
                call rrtmgp_set_aer_lw(icall, state, pbuf, aer_lw)
 
                ! Call the main rrtmgp_lw driver
@@ -1375,8 +1361,7 @@ subroutine radiation_tend( &
                   call endrun(sub//': '//errmsg)
                end if
                !$acc end data
-               call t_stopf('radiation_tend:DTO')
-
+               
                ! Transform RRTMGP outputs to CAM outputs and compute heating rates.
                call set_lw_diags()
 
