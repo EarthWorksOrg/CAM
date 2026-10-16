@@ -1,3 +1,7 @@
+This is a version of CAM-MPAS used by EarthWorks.
+This work has been supported by the National Science Foundation under Grant
+[OAC‐2005137](https://www.nsf.gov/awardsearch/show-award/?AWD_ID=2005137) to Colorado State University.
+
 # CAM: The Community Atmosphere Model
 
 ## NOTE: This is **unsupported** development code and is subject to the [CESM developer's agreement](http://www.cgd.ucar.edu/cseg/development-code.html).
